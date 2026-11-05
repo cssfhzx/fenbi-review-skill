@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+Thumbs.db
+
+# 生成的中间文件
+*_parsed.json
+*_imgs/
+*_复盘.docx
+analyses.json
+
+# 个人数据
+*.pdf
