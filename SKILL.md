@@ -177,7 +177,16 @@ fenbi-review/
 ├── references/
 │   ├── cause-taxonomy.md         # 错因分类体系
 │   └── analysis-writing.md       # 分析写作规范
-└── samples/
-    ├── analyses-example.json     # 错因分析示例（资料分析/类比）
-    └── analyses-yanyu.json       # 完整示例（言语理解 20 题）
+├── samples/
+│   ├── analyses-example.json     # 错因分析示例（资料分析/类比）
+│   └── analyses-yanyu.json       # 完整示例（言语理解 20 题）
+├── LICENSE                       # MIT
+├── README.md                     # 开源说明
+└── requirements.txt
 ```
+
+## 许可
+
+MIT License。仓库：https://github.com/cssfhzx/fenbi-review-skill
+
+欢迎提 issue 报告题型误判的案例——附上 PDF（可脱敏）比描述更容易复现。
