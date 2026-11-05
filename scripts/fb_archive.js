@@ -91,9 +91,11 @@ function main() {
     try { wq = JSON.parse(fs.readFileSync(wqPath, 'utf-8')); } catch (_) { wq = []; }
   }
   const added = [];
+  // 同一天可能做多套卷子，题号会重复，用「日期+来源文件名+题号」做唯一键
+  const srcTag = path.basename(d.file).replace(/_parsed\.json$/, '').replace(/[^\w\u4e00-\u9fa5-]/g, '');
   for (const q of qs) {
     if (q.right !== false) continue;
-    const id = `fb-${date}-${q.no}`;
+    const id = `fb-${date}-${srcTag}-${q.no}`;
     if (wq.some(x => x.id === id)) continue;
     const item = {
       id,
