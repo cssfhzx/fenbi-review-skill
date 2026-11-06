@@ -89,9 +89,11 @@ function main() {
   const stats = d.stats || {};
 
   ensureDir(DATA);
+  // dayDir 与 modules 一样必须在 if 之外：统计缓存段（第 3 步）也要用它
+  const dayDir = path.join(DATA, 'daily');
 
-  // 1. 每日记录（按模块聚合）。--skip-stats 时跳过，避免回填字段把成绩重复累加
-  if (!skipStats) {
+  // 1. 每日记录（按模块聚合）。--skip-stats 时跳过写入，避免回填字段把成绩重复累加。
+  // modules 必须在 if 之外计算：统计缓存段（第 3 步）也要用它。
   const modules = {};
   for (const q of qs) {
     const mod = TYPE_TO_MODULE[q.type] || '未分类';
@@ -104,7 +106,7 @@ function main() {
     m.accuracy = m.total ? Math.round((m.right / m.total) * 1000) / 10 : 0;
   }
 
-  const dayDir = path.join(DATA, 'daily');
+  if (!skipStats) {
   ensureDir(dayDir);
   const dayPath = path.join(dayDir, `${date}.json`);
   let day = {};

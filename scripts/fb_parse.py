@@ -193,6 +193,20 @@ def guess_type(stem, opts, n_img):
         return "资料分析"
     if any(k in s for k in DATA_PREFIX) and any(k in s for k in ("约占", "约为", "比上年", "增长了", "下降了")):
         return "资料分析"
+    # 常识判断：知识性判断题（法律/人文/科技/时政），选项各自是独立知识点，
+    # 不是对一段文字的理解。必须排在片段阅读细分之前，否则「下列…说法错误的是」
+    # 会被抢成片段阅读-细节判断。排除「这段文字/文意/材料/作者/意在/主旨」等
+    # 片段阅读标志，避免误伤言语卷。
+    if re.search(r"根据《|依据《|《中华人民共和国|《[^》]*条例》|《[^》]*规定》", s):
+        return "常识判断"
+    if re.search(r"表述错误的?有几处|说法(正确|错误|不正确)的有几项|属于.{0,12}的有几项"
+                 r"|错误的有几处|正确的有几处|画横线部分.{0,8}错误", s):
+        return "常识判断"
+    if re.search(r"下列关于|下列有关|下列与.{0,15}(有关|相关)|下列.{0,10}说法(正确|错误|不正确)"
+                 r"|关于.{0,20}下列说法|下列.{0,10}对应不正确|对应不正确的是", s) \
+            and not re.search(r"这段文字|这个文段|文段|文意|上述|材料|作者|意在|旨在|主旨"
+                              r"|主要说明|主要讲述|主要介绍|主要谈论|概括|接下来|下文", s):
+        return "常识判断"
     # 片段阅读按问法细分（题干结尾的问法句）
     if re.search(r"意在说明|意图|想要说明|意在强调|旨在", tail):
         return "片段阅读-意图判断"
@@ -275,10 +289,15 @@ def main():
             m = ANS_M.match(ln["t"])
             if m:
                 mine = m.group(1)
+        qtype = guess_type(stem, opts, len(qimg))
+        # 文件名带「常识判断」的是专项卷，整卷强制归类（避免个别题问法
+        # 命中言语规则被误分模块）。只对专项卷生效，不影响智能组卷。
+        if "常识判断" in os.path.basename(pdf):
+            qtype = "常识判断"
         questions.append({
             "no": seg["no"],
             "page": seg["page"],
-            "type": guess_type(stem, opts, len(qimg)),
+            "type": qtype,
             "stem": stem,
             "options": opts,
             "my": mine,
