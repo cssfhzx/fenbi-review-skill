@@ -1,5 +1,7 @@
 // 把粉笔解析结果归档到 kaogong-study-tracker
-// 用法: node fb_archive.js <parsed.json> [--date 2026-11-04]
+// 用法: node fb_archive.js <parsed.json> [--date 2026-11-04] [--analyses <analyses.json>] [--skip-stats]
+//   --analyses   把错因分析 JSON 的 cause/tag/note/colloc/analysis 首句写进错题本，error_reason 不再留「未说明」
+//   --skip-stats 只刷新 wrong_questions.json，不重复累加 daily 与 stats_cache（用于给已有条目回填字段）
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -30,16 +32,57 @@ function ensureDir(d) {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 }
 
+// 读取错因分析 JSON（键为题号）。文件不存在/损坏时给警告并返回 null，绝不静默退化成「未说明」
+function loadAnalyses(p) {
+  if (!p) return null;
+  if (!fs.existsSync(p)) {
+    console.warn(`[archive] 警告: --analyses 文件不存在: ${p}`);
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch (e) {
+    console.warn(`[archive] 警告: --analyses 解析失败: ${e.message}`);
+    return null;
+  }
+}
+
+function aFor(analyses, no) {
+  if (!analyses) return null;
+  return analyses[String(no)] || analyses[no] || null;
+}
+
+// 去掉 analyses 文本里残留的 markdown 加粗标记，避免 docx 里出现字面 **
+function clean(s) {
+  return String(s == null ? '' : s).replace(/\*\*/g, '');
+}
+
+// 把 cause/tag/note/colloc/analysis 写进一条错题记录；返回是否成功
+function enrich(item, a) {
+  if (!a) return false;
+  item.error_reason = clean(a.cause) || item.error_reason || '未说明';
+  if (a.tag) item.tag = clean(a.tag);
+  if (a.note) item.note = clean(a.note);
+  if (a.colloc) item.colloc = clean(Array.isArray(a.colloc) ? a.colloc.join('；') : a.colloc);
+  const an = Array.isArray(a.analysis) ? a.analysis : [a.analysis];
+  const first = an.filter(Boolean).join(' ').trim();
+  if (first) item.analysis = clean(first).slice(0, 240);
+  return true;
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (!args[0]) {
-    console.error('用法: node fb_archive.js <parsed.json> [--date YYYY-MM-DD]');
+    console.error('用法: node fb_archive.js <parsed.json> [--date YYYY-MM-DD] [--analyses <analyses.json>] [--skip-stats]');
     process.exit(1);
   }
   const jsonPath = args[0];
   let date = new Date().toISOString().slice(0, 10);
   const di = args.indexOf('--date');
   if (di >= 0 && args[di + 1]) date = args[di + 1];
+  const ai = args.indexOf('--analyses');
+  const analyses = loadAnalyses(ai >= 0 ? args[ai + 1] : null);
+  const skipStats = args.includes('--skip-stats');
 
   const d = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
   const qs = d.questions || [];
@@ -47,7 +90,8 @@ function main() {
 
   ensureDir(DATA);
 
-  // 1. 每日记录（按模块聚合）
+  // 1. 每日记录（按模块聚合）。--skip-stats 时跳过，避免回填字段把成绩重复累加
+  if (!skipStats) {
   const modules = {};
   for (const q of qs) {
     const mod = TYPE_TO_MODULE[q.type] || '未分类';
@@ -84,6 +128,7 @@ function main() {
   day.updated_at = new Date().toISOString();
   fs.writeFileSync(dayPath, JSON.stringify(day, null, 2), 'utf-8');
   console.log(`[archive] 每日记录: ${dayPath}`);
+  } // end if (!skipStats)
 
   // 2. 错题本
   const wqPath = path.join(DATA, 'wrong_questions.json');
@@ -92,12 +137,28 @@ function main() {
     try { wq = JSON.parse(fs.readFileSync(wqPath, 'utf-8')); } catch (_) { wq = []; }
   }
   const added = [];
+  const refreshed = [];
+  const unmatched = [];
+  const aByNo = new Map();
+  if (analyses) {
+    for (const [k, v] of Object.entries(analyses)) {
+      if (k === '_plan' || !v || typeof v !== 'object') continue;
+      aByNo.set(String(k), v);
+    }
+  }
   // 同一天可能做多套卷子，题号会重复，用「日期+来源文件名+题号」做唯一键
   const srcTag = path.basename(d.file).replace(/_parsed\.json$/, '').replace(/[^\w\u4e00-\u9fa5-]/g, '');
   for (const q of qs) {
     if (q.right !== false) continue;
     const id = `fb-${date}-${srcTag}-${q.no}`;
-    if (wq.some(x => x.id === id)) continue;
+    const existing = wq.find(x => x.id === id);
+    const a = aByNo.get(String(q.no)) || null;
+    if (analyses && !a) unmatched.push(q.no);
+    if (existing) {
+      // 已存在的条目：只补/刷新分析字段，不动 date/module/status/created_at
+      if (a && enrich(existing, a)) refreshed.push(id);
+      continue;
+    }
     const item = {
       id,
       date,
@@ -112,13 +173,20 @@ function main() {
       status: '待二刷',
       created_at: new Date().toISOString(),
     };
+    enrich(item, a);
     wq.push(item);
     added.push(id);
   }
   fs.writeFileSync(wqPath, JSON.stringify(wq, null, 2), 'utf-8');
-  console.log(`[archive] 错题本: ${wqPath}  新增 ${added.length} 条，共 ${wq.length} 条`);
+  console.log(`[archive] 错题本: ${wqPath}  新增 ${added.length} 条，回填 ${refreshed.length} 条，共 ${wq.length} 条`);
+  if (!analyses) {
+    console.warn('[archive] 警告: 未提供 --analyses，error_reason 保留「未说明」。建议跑 fb_pipeline.py 生成 analyses JSON 后带上本参数。');
+  } else if (unmatched.length) {
+    console.warn(`[archive] 警告: ${unmatched.length} 道错题在 analyses JSON 中无对应项: Q${unmatched.join(' Q')}`);
+  }
 
-  // 3. 统计缓存
+  // 3. 统计缓存（--skip-stats 时跳过，避免回填时重复累加）
+  if (skipStats) return;
   const cachePath = path.join(DATA, 'stats_cache.json');
   let cache = { last_updated: date, total_days_studied: 0, streak: 0, module_accuracy: {} };
   if (fs.existsSync(cachePath)) {
